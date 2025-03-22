@@ -1,0 +1,5 @@
+pandas
+cloudscraper
+beautifulsoup4
+sqlalchemy
+psycopg2-binary
