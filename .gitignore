@@ -1,4 +1,5 @@
 *.log
+*.log.1
 *.env
 *.cpython-312.pyc
 /exclalidraw
