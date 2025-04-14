@@ -3,3 +3,4 @@
 *.env
 *.cpython-312.pyc
 /exclalidraw
+/airflow/logs

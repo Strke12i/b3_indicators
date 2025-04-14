@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+from fuzzywuzzy import fuzz
+import gc
 
 class CalculadoraIndicadoresFinanceiros:
     def __init__(self, db_config, id_empresa):
@@ -11,71 +13,91 @@ class CalculadoraIndicadoresFinanceiros:
         self.metricas = {
             'receita_liquida': {
                 'tipo_relatorio': "Demonstração do Resultado",
-                'descricao': "Receita de Venda de Bens e/ou Serviços"
+                'codigo_conta': 301,
+                'descricao': ["Receita de Venda de Bens e/ou Serviços", "Receitas de Intermediação Financeira"]
             },
             'ebit': {
                 'tipo_relatorio': "Demonstração do Resultado",
-                'descricao': "Resultado Antes do Resultado Financeiro e dos Tributos"
+                'codigo_conta': 305,
+                'descricao': ["Resultado Antes do Resultado Financeiro e dos Tributos"]
             },
             'resultado_liquido': {
                 'tipo_relatorio': "Demonstração do Resultado",
-                'descricao': "Resultado Líquido das Operações Continuadas"
+                'codigo_conta': 309,
+                'descricao': ["Resultado Líquido das Operações Continuadas"]
             },
             'participacao_nao_controladora': {
                 'tipo_relatorio': "Demonstração do Resultado",
-                'descricao': "Atribuído a Sócios Não Controladores"
+                'codigo_conta': 31102,
+                'descricao': ["Atribuído a Sócios Não Controladores"]
             },
-            'lucro_liquido': {
+            'lucro_periodo': {
                 'tipo_relatorio': "Demonstração do Resultado",
-                'descricao': "Atribuído a Sócios da Empresa Controladora"
+                'codigo_conta': 311,
+                'descricao': ["Lucro/Prejuízo Consolidado do Período"]
+            },
+            'socios_nao_participadores': {
+                'tipo_relatorio': "Demonstração do Resultado",
+                'codigo_conta': 31102,
+                'descricao': ["Atribuído a Sócios Não Controladores"]
             },
             'deprec': {
                 'tipo_relatorio': "Demonstração do Fluxo de Caixa",
-                'descricoes': [
-                    "Depreciação, Amortização e Exaustão",
-                    "Depreciação e amortização",
-                    "Depreciação, depleção e amortização"
-                ]
+                'codigo_conta': [6010102, 6010103, 6010108],
+                'descricao': ["Depreciação, Amortização e Exaustão", "Depreciação e amortização", "Depreciação"]
             }
         }
         self.metricas_ajustadas = {
             'ativo_total': {
                 'tipo_relatorio': "Balanço Patrimonial Ativo",
-                'descricao': "Ativo Total"
+                'codigo_conta': 1,
+                'descricao': ["Ativo Total"]
             },
             'passivo_circulante': {
                 'tipo_relatorio': "Balanço Patrimonial Passivo",
-                'descricao': "Passivo Circulante"
+                'codigo_conta': 201,
+                'descricao': ["Passivo Circulante"]
             },
             'total_emprestimos_e_financiamentos': {
                 'tipo_relatorio': "Balanço Patrimonial Passivo",
-                'descricao': "Empréstimos e Financiamentos"
+                'codigo_conta': [20104, 201041],
+                'descricao': ["Empréstimos e Financiamentos", "Financiamentos e Empréstimos"]
             },
             'caixa_e_equivalentes': {
                 'tipo_relatorio': "Balanço Patrimonial Ativo",
-                'descricao': "Caixa e Equivalentes de Caixa"
+                'codigo_conta': 10101,
+                'descricao': ["Caixa e Equivalentes de Caixa"]
             },
             'aplicacoes_financeiras': {
                 'tipo_relatorio': "Balanço Patrimonial Ativo",
-                'descricoes': ["Aplicações Financeiras1", "Aplicações Financeiras"]
+                'codigo_conta': 10102,
+                'descricao': ["Aplicações Financeiras"]
             },
             'patrimonio_liquido': {
                 'tipo_relatorio': "Balanço Patrimonial Passivo",
-                'descricao': "Patrimônio Líquido Consolidado"
+                'codigo_conta': [203, 207],
+                'descricao': ["Patrimônio Líquido Consolidado"]
             },
             'participacao_nao_controladora_acionistas': {
                 'tipo_relatorio': "Balanço Patrimonial Passivo",
-                'descricao': "Participação dos Acionistas Não Controladores"
+                'codigo_conta': 20309,
+                'descricao': ["Participação dos Acionistas Não Controladores"]
             },
             'total_emprestimos_e_financiamentos_lp': {
                 'tipo_relatorio': "Balanço Patrimonial Passivo",
-                'descricao': "Empréstimos e Financiamentos3"
+                'codigo_conta': [20201, 2020101, 2010108, 202010106, 201040201],
+                'descricao': ["Empréstimos e Financiamentos"]
             },
         }
 
     def carregar_dados(self):
-        df_dados = pd.read_sql_table('dados_relatorio', self.db_config)
-        df_relatorio = pd.read_sql_table('relatorio', self.db_config)
+        df_relatorio = pd.read_sql("SELECT * FROM relatorio WHERE id_empresa = %s", self.db_config, params=(self.id_empresa,))
+
+        ids_relatorio = df_relatorio['id_relatorio'].unique()
+        ids_relatorio = [int(id_relatorio) for id_relatorio in ids_relatorio]
+        placeholder = ', '.join(['%s'] * len(ids_relatorio))
+        query = f"SELECT * FROM dados_relatorio WHERE id_relatorio IN ({placeholder})"
+        df_dados = pd.read_sql(query, self.db_config, params=tuple(ids_relatorio))
 
         if 'id_empresa' not in df_dados.columns:
             if 'id_empresa' in df_relatorio.columns:
@@ -90,66 +112,111 @@ class CalculadoraIndicadoresFinanceiros:
         self.df['data_inicio'] = pd.to_datetime(self.df['data_inicio'])
         self.df['data_fim'] = pd.to_datetime(self.df['data_fim'])
 
-    def adicionar_metrica(self, nome_metrica, tipo_relatorio, descricao, ajustada=False):
+
+    def adicionar_metrica(self, nome_metrica, tipo_relatorio, codigo_conta, descricao, ajustada=False):
+        # Garantir que descricao seja uma lista, mesmo que tenha um único item
+        if not isinstance(descricao, (list, tuple)):
+            descricao = [descricao]
         if ajustada:
             self.metricas_ajustadas[nome_metrica] = {
                 'tipo_relatorio': tipo_relatorio,
+                'codigo_conta': codigo_conta,
                 'descricao': descricao
             }
         else:
             self.metricas[nome_metrica] = {
                 'tipo_relatorio': tipo_relatorio,
+                'codigo_conta': codigo_conta,
                 'descricao': descricao
             }
+
+    def _filtrar_metrica(self, dados, tipo_relatorio, codigo_conta, descricao, nome_coluna_valor, limiar_similaridade=99):
+        # Função auxiliar para verificar similaridade
+        def is_similar(desc_df, desc_ref_list):
+            if pd.isna(desc_df):
+                return False
+            return any(fuzz.token_sort_ratio(desc_df, desc_ref) >= limiar_similaridade for desc_ref in desc_ref_list)
+
+        # Filtrar por tipo_relatorio e codigo_conta primeiro
+        if isinstance(codigo_conta, (list, tuple)):
+            dados_filtrados = dados[
+                (dados["tipo_relatorio"] == tipo_relatorio) &
+                (dados["codigo_conta"].isin(codigo_conta))
+            ]
+        else:
+            dados_filtrados = dados[
+                (dados["tipo_relatorio"] == tipo_relatorio) &
+                (dados["codigo_conta"] == codigo_conta)
+            ]
+
+        # Verificar similaridade com qualquer uma das descrições fornecidas
+        filtro = dados_filtrados[
+            dados_filtrados["descricao"].apply(lambda x: is_similar(x, descricao))
+        ]
+
+        return filtro.rename(columns={"valor": nome_coluna_valor})
 
     def filtrar_metricas(self):
         if self.df is None:
             raise ValueError("Dados não carregados. Execute carregar_dados() primeiro.")
         
+        datas_fim = self.df['data_fim'].unique()
+        
         for nome_metrica, config in self.metricas.items():
-            if nome_metrica == 'deprec':
-                # Tratamento especial para deprec com múltiplas descrições
-                df_metrica = pd.DataFrame()
-                for descricao in config['descricoes']:
+            df_metrica = pd.DataFrame()
+            if isinstance(config['codigo_conta'], (list, tuple)):
+                # Para múltiplos códigos, tentar cada um até encontrar um match
+                for codigo in config['codigo_conta']:
                     filtro = self._filtrar_metrica(
-                        self.df, config['tipo_relatorio'], descricao, nome_metrica
+                        self.df, config['tipo_relatorio'], codigo, config['descricao'], nome_metrica
                     )
                     if not filtro.empty:
-                        # Usar a primeira descrição encontrada com dados
                         df_metrica = filtro
                         break
-                self.dataframes_metricas[nome_metrica] = df_metrica
             else:
-                self.dataframes_metricas[nome_metrica] = self._filtrar_metrica(
-                    self.df, config['tipo_relatorio'], config['descricao'], nome_metrica
+                df_metrica = self._filtrar_metrica(
+                    self.df, config['tipo_relatorio'], config['codigo_conta'], config['descricao'], nome_metrica
                 )
+            
+            if df_metrica.empty:
+                df_metrica = pd.DataFrame({
+                    'id_empresa': [self.id_empresa] * len(datas_fim),
+                    'data_fim': datas_fim,
+                    'data_inicio': [pd.NaT] * len(datas_fim),
+                    nome_metrica: [0] * len(datas_fim)
+                })
+            self.dataframes_metricas[nome_metrica] = df_metrica
+            del df_metrica
+            gc.collect()
         
         for nome_metrica, config in self.metricas_ajustadas.items():
-            if nome_metrica == 'aplicacoes_financeiras':
-                # Tratamento especial para aplicacoes_financeiras com múltiplas descrições
-                df_ajustado = pd.DataFrame()
-                for descricao in config['descricoes']:
+            df_ajustado = pd.DataFrame()
+            if isinstance(config['codigo_conta'], (list, tuple)):
+                # Para múltiplos códigos, tentar cada um até encontrar um match
+                for codigo in config['codigo_conta']:
                     filtro = self._filtrar_metrica(
-                        self.df, config['tipo_relatorio'], descricao, nome_metrica
+                        self.df, config['tipo_relatorio'], codigo, config['descricao'], nome_metrica
                     )
                     if not filtro.empty:
-                        # Usar a primeira descrição encontrada com dados
                         df_ajustado = filtro
                         break
-                self.dataframes_ajustados[nome_metrica] = df_ajustado[
-                    df_ajustado['data_inicio'].isna()
-                ][['id_empresa', 'data_fim', nome_metrica]]
             else:
-                self.dataframes_ajustados[nome_metrica] = self._filtrar_metrica(
-                    self.df, config['tipo_relatorio'], config['descricao'], nome_metrica
+                df_ajustado = self._filtrar_metrica(
+                    self.df, config['tipo_relatorio'], config['codigo_conta'], config['descricao'], nome_metrica
                 )
-
-    def _filtrar_metrica(self, dados, tipo_relatorio, descricao, nome_coluna_valor):
-        filtro = dados[
-            (dados["tipo_relatorio"] == tipo_relatorio) &
-            (dados["descricao"] == descricao)
-        ]
-        return filtro.rename(columns={"valor": nome_coluna_valor})
+            
+            if df_ajustado.empty:
+                df_ajustado = pd.DataFrame({
+                    'id_empresa': [self.id_empresa] * len(datas_fim),
+                    'data_fim': datas_fim,
+                    'data_inicio': [pd.NaT] * len(datas_fim),
+                    nome_metrica: [0] * len(datas_fim)
+                })
+            if not df_ajustado.empty and 'data_inicio' in df_ajustado.columns:
+                df_ajustado = df_ajustado[df_ajustado['data_inicio'].isna()]
+            self.dataframes_ajustados[nome_metrica] = df_ajustado[['id_empresa', 'data_fim', nome_metrica]]
+            del df_ajustado
+            gc.collect()
 
     def calcular_valor_12m(self, df, data_fim_target, valor_col):
         data_fim_target = pd.to_datetime(data_fim_target)
@@ -180,7 +247,7 @@ class CalculadoraIndicadoresFinanceiros:
             linha_ano_anterior = df[
                 (df['data_inicio'] == data_inicio_ano_anterior) & 
                 (df['data_fim'] == data_fim_ano_anterior_completo)
-                ]
+            ]
             if linha_ano_anterior.empty:
                 return None
         
@@ -191,7 +258,6 @@ class CalculadoraIndicadoresFinanceiros:
             (df['data_fim'] == data_fim_ano_anterior)
         ]
         if linha_ate_data_fim_ano_anterior.empty:
-            # Adicionar mais um ano ao data_fim_ano_anterior
             data_fim_ano_anterior = pd.to_datetime(f'{ano_anterior+1}-{mes:02d}-{dia:02d}')
             linha_ate_data_fim_ano_anterior = df[
                 (df['data_inicio'] == data_inicio_ano_anterior) & 
@@ -236,6 +302,7 @@ class CalculadoraIndicadoresFinanceiros:
             valores = {}
             for nome_metrica, df_metrica in self.dataframes_metricas.items():
                 valor_12m = self.calcular_valor_12m(df_metrica, data_fim, nome_metrica)
+                
                 valores[nome_metrica] = valor_12m if valor_12m is not None else np.nan
             
             resultado_12m['data_fim'].append(data_fim)
@@ -247,6 +314,9 @@ class CalculadoraIndicadoresFinanceiros:
         df_resultado['data_fim'] = pd.to_datetime(df_resultado['data_fim'])
 
         for nome_metrica, df_ajustado in self.dataframes_ajustados.items():
+            df_ajustado = df_ajustado[['id_empresa', 'data_fim', nome_metrica]].drop_duplicates(
+                subset=['id_empresa', 'data_fim'], keep='last'
+            )
             df_resultado = df_resultado.merge(
                 df_ajustado[['id_empresa', 'data_fim', nome_metrica]],
                 on=['id_empresa', 'data_fim'],
@@ -280,7 +350,13 @@ class CalculadoraIndicadoresFinanceiros:
                 df_resultados['patrimonio_liquido'] - 
                 df_resultados['participacao_nao_controladora_acionistas']
             ),
+            'lucro_liquido': (
+                df_resultados['lucro_periodo'] -
+                df_resultados['socios_nao_participadores']
+            ),
         }
+        
+        df_resultados.drop(columns=['lucro_periodo','socios_nao_participadores'], inplace = True)
 
         for nome, serie in indicadores_primarios.items():
             df_resultados[nome] = serie
@@ -301,8 +377,9 @@ class CalculadoraIndicadoresFinanceiros:
                 df_resultados['aplicacoes_financeiras']
             ),
             'margem_ebit': df_resultados['ebit'] / df_resultados['receita_liquida'],
-            'margem_liquida': (df_resultados['lucro_liquido'] + df_resultados['participacao_nao_controladora']) / df_resultados['receita_liquida'],
-    
+            'margem_liquida': (
+                df_resultados['lucro_liquido'] + df_resultados['participacao_nao_controladora']
+            ) / df_resultados['receita_liquida'],
         }
         
         for nome, serie in indicadores_secundarios.items():
@@ -310,9 +387,40 @@ class CalculadoraIndicadoresFinanceiros:
 
         df_resultados['divida_liquida_ebitda'] = df_resultados['divida_liquida'] / df_resultados['ebitda']
         
-        # Formatar todos os valores para 2 casas decimais
         for coluna in df_resultados.columns:
             if coluna not in ['id_empresa', 'data_fim']:
                 df_resultados[coluna] = df_resultados[coluna].round(4)
         
         return df_resultados
+    
+    def _save_results_to_db(self, df_resultado, session, indicators_table):
+        from sqlalchemy.dialects.postgresql import insert
+
+        try:
+            # Converter DataFrame para lista de dicionários
+            df_resultado['tempo_analisado'] = 12
+            records = df_resultado.to_dict('records')
+
+            # Inserção/Atualização em lote
+            for record in records:
+                stmt = insert(indicators_table).values(record)
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=['id_empresa', 'data_fim', 'tempo_analisado'],
+                    set_=record
+                )
+                session.execute(stmt)
+            session.commit()
+            print(f"Salvo {len(records)} registros para empresa {self.id_empresa}")
+        except Exception as e:
+            print(f"Erro ao salvar no banco: {e}")
+            session.rollback()
+            raise
+    
+    def run(self, session, indicators_table):
+        df_resultado = self.executar()
+        df_resultado = df_resultado.dropna(subset=df_resultado.columns.difference(['data_fim', 'id_empresa']), how='all')
+        df_resultado = self.calculo_indicadores(df_resultado)
+        df_resultado.drop_duplicates(subset=['data_fim'], keep='last', inplace=True)
+        
+        self._save_results_to_db(df_resultado, session, indicators_table)
+            

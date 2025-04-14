@@ -3,3 +3,7 @@ cloudscraper
 beautifulsoup4
 sqlalchemy
 psycopg2-binary
+pendulum
+openpyxl
+fuzzywuzzy
+python-Levenshtein
