@@ -123,13 +123,6 @@ def insert_data_v2(df_data, att_time):
             df_data['DT_INI_EXERC'] = df_data['DT_INI_EXERC'].where(pd.notna(df_data['DT_INI_EXERC']), None)
         else:
             df_data['DT_INI_EXERC'] = None
-        
-        try:
-            df_data['CD_CONTA'] = df_data['CD_CONTA'].astype(str).str.replace('.', '').str.replace(',', '', regex=True).astype(int)
-        except Exception as e:
-            print("Erro ao converter CD_CONTA:", e)
-            print("Valores problemáticos:", df_data[~df_data['CD_CONTA'].astype(str).str.replace('.', '').str.replace(',', '', regex=True).str.isnumeric()])
-
                 
         print("Inserindo dados para o relatório:", df_data['GRUPO_DFP'].unique()[0])
         
@@ -247,7 +240,7 @@ def insert_data_v2(df_data, att_time):
                     for _, row in group.iterrows():
                         descricao = str(row["DS_CONTA"])
                         valor = float(str(row["VL_CONTA"]).replace(",", '.')) if pd.notna(row["VL_CONTA"]) else 0.0
-                        codigo_conta = int(str(row["CD_CONTA"]).replace(".", ""))
+                        codigo_conta = str(row["CD_CONTA"])
 
                         key = (relatorio_id, codigo_conta)
 
@@ -334,7 +327,7 @@ default_args = {
 }
 
 with DAG(
-    dag_id='cvm_data_com_scraping_diario',
+    dag_id='Monitoramento',
     default_args=default_args,
     schedule_interval='@daily',  # Agora roda todo dia
     catchup=False
@@ -364,8 +357,7 @@ with DAG(
 
         # Data de hoje (no formato date, sem horas)
         # Faz a data de hoje ser 06-Apr-2025
-        hoje = datetime.date(2025, 4, 6)
-        #hoje = datetime.datetime.today().date()
+        hoje = datetime.datetime.today().date()
 
         # Função auxiliar para verificar se a data_mod = HOJE
         def data_e_hoje(data_mod_str):

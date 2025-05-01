@@ -36,7 +36,7 @@ with DAG(
     schedule_interval=None,
     start_date=datetime(2023, 1, 1),
     catchup=False,
-    max_active_tasks=1  # Ajuste conforme necessário
+    max_active_tasks=3  # Ajuste conforme necessário
 ) as dag:
 
     @task

@@ -13,79 +13,79 @@ class CalculadoraIndicadoresFinanceiros:
         self.metricas = {
             'receita_liquida': {
                 'tipo_relatorio': "Demonstração do Resultado",
-                'codigo_conta': 301,
+                'codigo_conta': "3.01",
                 'descricao': ["Receita de Venda de Bens e/ou Serviços", "Receitas de Intermediação Financeira"]
             },
             'ebit': {
                 'tipo_relatorio': "Demonstração do Resultado",
-                'codigo_conta': 305,
+                'codigo_conta': "3.05",
                 'descricao': ["Resultado Antes do Resultado Financeiro e dos Tributos"]
             },
             'resultado_liquido': {
                 'tipo_relatorio': "Demonstração do Resultado",
-                'codigo_conta': 309,
+                'codigo_conta': "3.09",
                 'descricao': ["Resultado Líquido das Operações Continuadas"]
             },
             'participacao_nao_controladora': {
                 'tipo_relatorio': "Demonstração do Resultado",
-                'codigo_conta': 31102,
+                'codigo_conta': "3.11.02",
                 'descricao': ["Atribuído a Sócios Não Controladores"]
             },
             'lucro_periodo': {
                 'tipo_relatorio': "Demonstração do Resultado",
-                'codigo_conta': 311,
+                'codigo_conta': "3.11",
                 'descricao': ["Lucro/Prejuízo Consolidado do Período"]
             },
             'socios_nao_participadores': {
                 'tipo_relatorio': "Demonstração do Resultado",
-                'codigo_conta': 31102,
+                'codigo_conta': "3.11.02",
                 'descricao': ["Atribuído a Sócios Não Controladores"]
             },
             'deprec': {
                 'tipo_relatorio': "Demonstração do Fluxo de Caixa",
-                'codigo_conta': [6010102, 6010103, 6010108],
-                'descricao': ["Depreciação, Amortização e Exaustão", "Depreciação e amortização", "Depreciação"]
+                'codigo_conta': ["6.01.01.02", "6.01.01.03", "6.01.01.08", "6.01.01.06", "6.01.01.04"],
+                'descricao': ["Depreciação, Amortização e Exaustão", "Depreciação e amortização", "Depreciação", "Depreciação, depleção e amortização"]
             }
         }
         self.metricas_ajustadas = {
             'ativo_total': {
                 'tipo_relatorio': "Balanço Patrimonial Ativo",
-                'codigo_conta': 1,
+                'codigo_conta': "1",
                 'descricao': ["Ativo Total"]
             },
             'passivo_circulante': {
                 'tipo_relatorio': "Balanço Patrimonial Passivo",
-                'codigo_conta': 201,
+                'codigo_conta': "2.01",
                 'descricao': ["Passivo Circulante"]
             },
             'total_emprestimos_e_financiamentos': {
                 'tipo_relatorio': "Balanço Patrimonial Passivo",
-                'codigo_conta': [20104, 201041],
+                'codigo_conta': ["2.01.04", "2.01.04.1"],
                 'descricao': ["Empréstimos e Financiamentos", "Financiamentos e Empréstimos"]
             },
             'caixa_e_equivalentes': {
                 'tipo_relatorio': "Balanço Patrimonial Ativo",
-                'codigo_conta': 10101,
+                'codigo_conta': "1.01.01",
                 'descricao': ["Caixa e Equivalentes de Caixa"]
             },
             'aplicacoes_financeiras': {
                 'tipo_relatorio': "Balanço Patrimonial Ativo",
-                'codigo_conta': 10102,
+                'codigo_conta': "1.01.02",
                 'descricao': ["Aplicações Financeiras"]
             },
             'patrimonio_liquido': {
                 'tipo_relatorio': "Balanço Patrimonial Passivo",
-                'codigo_conta': [203, 207],
+                'codigo_conta': ["2.03", "2.07"],
                 'descricao': ["Patrimônio Líquido Consolidado"]
             },
             'participacao_nao_controladora_acionistas': {
                 'tipo_relatorio': "Balanço Patrimonial Passivo",
-                'codigo_conta': 20309,
+                'codigo_conta': "2.03.09",
                 'descricao': ["Participação dos Acionistas Não Controladores"]
             },
             'total_emprestimos_e_financiamentos_lp': {
                 'tipo_relatorio': "Balanço Patrimonial Passivo",
-                'codigo_conta': [20201, 2020101, 2010108, 202010106, 201040201],
+                'codigo_conta': ["2.02.01", "2.02.01.01", "2.01.01.08", "2.02.01.01.06", "2.01.04.02.01"],
                 'descricao': ["Empréstimos e Financiamentos"]
             },
         }
@@ -164,19 +164,37 @@ class CalculadoraIndicadoresFinanceiros:
         
         for nome_metrica, config in self.metricas.items():
             df_metrica = pd.DataFrame()
-            if isinstance(config['codigo_conta'], (list, tuple)):
-                # Para múltiplos códigos, tentar cada um até encontrar um match
-                for codigo in config['codigo_conta']:
-                    filtro = self._filtrar_metrica(
-                        self.df, config['tipo_relatorio'], codigo, config['descricao'], nome_metrica
-                    )
-                    if not filtro.empty:
-                        df_metrica = filtro
-                        break
+            if nome_metrica == 'deprec':
+                # Lógica específica para a métrica 'deprec'
+                palavras_chave = ["Depreciação", "Amortização", "Depleção", "Exaustão", "Depreciações", "Amortizações"]
+                # Filtrar por tipo_relatorio e códigos que começam com '6.01.01'
+                dados_filtrados = self.df[
+                    (self.df["tipo_relatorio"] == config['tipo_relatorio']) &
+                    (self.df["codigo_conta"].str.startswith("6.01.01"))
+                ]
+                # Verificar se a descrição contém qualquer uma das palavras-chave
+                filtro = dados_filtrados[
+                    dados_filtrados["descricao"].str.contains('|'.join(palavras_chave), case=False, na=False)
+                ]
+                # Somar os valores por id_empresa e data_fim
+                if not filtro.empty:
+                    df_metrica = filtro.groupby(['id_empresa', 'data_fim', 'data_inicio'], as_index=False).agg({
+                        'valor': 'sum'
+                    }).rename(columns={'valor': nome_metrica})
             else:
-                df_metrica = self._filtrar_metrica(
-                    self.df, config['tipo_relatorio'], config['codigo_conta'], config['descricao'], nome_metrica
-                )
+                if isinstance(config['codigo_conta'], (list, tuple)):
+                    # Para múltiplos códigos, tentar cada um até encontrar um match
+                    for codigo in config['codigo_conta']:
+                        filtro = self._filtrar_metrica(
+                            self.df, config['tipo_relatorio'], codigo, config['descricao'], nome_metrica
+                        )
+                        if not filtro.empty:
+                            df_metrica = filtro
+                            break
+                else:
+                    df_metrica = self._filtrar_metrica(
+                        self.df, config['tipo_relatorio'], config['codigo_conta'], config['descricao'], nome_metrica
+                    )
             
             if df_metrica.empty:
                 df_metrica = pd.DataFrame({
@@ -188,6 +206,8 @@ class CalculadoraIndicadoresFinanceiros:
             self.dataframes_metricas[nome_metrica] = df_metrica
             del df_metrica
             gc.collect()
+        
+    # ... (o restante do método para metricas_ajustadas permanece inalterado)
         
         for nome_metrica, config in self.metricas_ajustadas.items():
             df_ajustado = pd.DataFrame()
@@ -288,6 +308,8 @@ class CalculadoraIndicadoresFinanceiros:
 
         valor_acumulado_ate_data_fim_target = linha_ate_data_fim_target[valor_col].values[0]
 
+            
+            
         return valor_ultimos_meses_ano_anterior + valor_acumulado_ate_data_fim_target
 
     def calcular_indicadores_12m(self):
@@ -302,6 +324,7 @@ class CalculadoraIndicadoresFinanceiros:
             valores = {}
             for nome_metrica, df_metrica in self.dataframes_metricas.items():
                 valor_12m = self.calcular_valor_12m(df_metrica, data_fim, nome_metrica)
+                
                 
                 valores[nome_metrica] = valor_12m if valor_12m is not None else np.nan
             

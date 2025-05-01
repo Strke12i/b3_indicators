@@ -1,0 +1,41 @@
+# docker-compose.yml
+
+version: '3.7'
+
+services:
+  n8n:
+    # Imagem oficial do n8n
+    image: n8nio/n8n:latest
+    # Nome do container (opcional, mas útil para identificação)
+    container_name: n8n_local
+    # Reinicia o container a menos que seja parado manualmente
+    restart: unless-stopped
+    # Mapeia a porta 5678 do container para a porta 5678 da sua máquina
+    ports:
+      - "5678:5678"
+    # Variáveis de ambiente
+    environment:
+      # Define o fuso horário - importante para agendamentos e triggers
+      # Ajuste para o seu fuso horário local. Lista: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+      - TZ=America/Sao_Paulo
+      # (Opcional) URL que o n8n usará para webhooks (útil se expor o n8n publicamente ou via túnel)
+      # Para uso puramente local, geralmente não é estritamente necessário definir,
+      # mas pode ser útil para alguns testes.
+      - WEBHOOK_URL=http://localhost:5678/
+    # Volumes para persistir os dados (workflows, credenciais, execuções)
+    volumes:
+      # Mapeia o diretório de dados do n8n dentro do container para um volume nomeado 'n8n_data'
+      - n8n_data:/home/node/.n8n
+    # (Opcional, mas recomendado) Executa como o usuário 'node' definido na imagem
+    # Ajuda a evitar problemas de permissão, especialmente se mapear para diretórios locais em vez de volumes nomeados.
+    user: node
+    networks:
+    - my_network
+
+volumes:
+  # Define o volume nomeado que será gerenciado pelo Docker
+  n8n_data: {}
+
+networks:
+  my_network:
+    external: true

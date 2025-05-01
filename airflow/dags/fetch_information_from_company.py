@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 from sqlalchemy import create_engine, MetaData, Table
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.sql import insert
 
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,7 @@ def _extract_company_information(df: pd.DataFrame):
     """
     Extrai as informações de cada empresa do DataFrame.
     """
+    tickers = {}
     for idx, row in df.iterrows():
         company_id = row['id_empresa']
         try:
@@ -84,6 +86,9 @@ def _extract_company_information(df: pd.DataFrame):
             if df.loc[idx, 'ticker'] is None:
                 df.loc[idx, 'ticker'] = company_info.get('code', None)
 
+            if company_info.get('otherCodes'):
+                tickers[company_id] = company_info.get('otherCodes')
+
             if df.loc[idx, 'data_ipo'] is pd.NaT or df.loc[idx, 'data_ipo'] is None:
                 date_quotation = company_info.get('dateQuotation', None)
                 if date_quotation is not None:
@@ -91,15 +96,34 @@ def _extract_company_information(df: pd.DataFrame):
                     df.loc[idx, 'data_ipo'] = datetime.strptime(date_quotation, "%d/%m/%Y")
 
             if df.loc[idx, 'ticker'] is not None and df.loc[idx, 'url_imagem'] is None:
-                df.loc[idx, 'url_imagem'] = _fetch_url_image(df.loc[idx, 'ticker'])
+                df.loc[idx, 'url_imagem'] = None #_fetch_url_image(df.loc[idx, 'ticker'])
 
         except Exception as e:
             logger.error(f"Erro ao buscar informações da empresa {company_id}: {str(e)}")
             continue
 
+    return {
+        'df': df, 
+        'tickers': tickers
+    }
+
+def _transform_tickers(data: dict):
+    tickers = data.get('tickers', {})
+    
+    rows = [(key, item_dict['code'],item_dict['isin'])
+        for key, value_list in tickers.items()
+        for item_dict in value_list]
+
+    # Criar o DataFrame a partir da lista de tuplas
+    df = pd.DataFrame(rows, columns=['id_empresa', 'ticker', 'isin'])
+    
     return df
 
-def _save_companies_to_db(df: pd.DataFrame):
+def _save_companies_to_db(data: dict):
+    df = data.get('df', pd.DataFrame())
+    logger.info("Salvando empresas no banco de dados")
+    logger.info(df.head())
+    print(df[['id_empresa', 'data_ipo']])
     try:
         # Cria a engine e a sessão
         engine = create_engine('postgresql+psycopg2://admin:admin_password@db:5432/meu_banco')
@@ -110,6 +134,10 @@ def _save_companies_to_db(df: pd.DataFrame):
         metadata = MetaData(bind=engine)
         companies_table = Table('empresa', metadata, autoload_with=engine)
 
+        df['data_ipo'] = pd.to_datetime(df['data_ipo'], errors='coerce')
+        df['data_ipo'] = df['data_ipo'].replace({pd.NaT: None})
+
+        print(df[['id_empresa', 'data_ipo']])
         # Itera sobre o DataFrame e atualiza os registros
         for idx, row in df.iterrows():
             stmt = (
@@ -132,6 +160,42 @@ def _save_companies_to_db(df: pd.DataFrame):
     finally:
         session.close()
 
+def _save_tickers_to_db(df: pd.DataFrame):
+    from sqlalchemy.dialects.postgresql import insert
+    try:
+        engine = create_engine('postgresql+psycopg2://admin:admin_password@db:5432/meu_banco')
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        metadata = MetaData(bind=engine)
+        tickers_table = Table('ticker', metadata, autoload_with=engine)
+        for idx, row in df.iterrows():
+            try:
+                stmt = insert(tickers_table).values(
+                    id_empresa=row['id_empresa'],
+                    ticker=row['ticker'],
+                    codigo_isin=row['isin']
+                )
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=['codigo_isin'],
+                    set_={
+                        'ticker': row['ticker'],
+                        'id_empresa': row['id_empresa'],
+                        'codigo_isin': row['isin']
+                    }
+                )
+                session.execute(stmt)
+            except Exception as e:
+                logger.error(f"Erro ao inserir ou atualizar ticker no banco de dados: {str(e)}")
+        session.commit()
+        logger.info("Tickers successfully saved to the database")
+    except Exception as ex:
+        logger.error(f"Erro ao salvar tickers no banco de dados: {str(ex)}")
+        session.rollback()
+        raise
+    finally:
+        session.close()
+    
+
 default_args = {
     'owner': 'airflow',
     'start_date': datetime.now(),
@@ -144,7 +208,7 @@ default_args = {
 }
 
 dag = DAG(
-    'fetch_information_from_company',
+    'atualiza_dados_de_empresas',
     default_args=default_args,
     description='Busca informações de empresas listadas na B3',
     schedule_interval='@daily',
@@ -167,11 +231,25 @@ t2 = PythonOperator(
 )
 
 t3 = PythonOperator(
+    task_id='transform_tickers',
+    python_callable=_transform_tickers,
+    dag=dag,
+    op_args=[t2.output],
+)
+
+t4 = PythonOperator(
     task_id='save_companies_to_db',
     python_callable=_save_companies_to_db,
     dag=dag,
     op_args=[t2.output],
 )
 
-t1 >> t2 >> t3
+t5 = PythonOperator(
+    task_id='save_tickers_to_db',
+    python_callable=_save_tickers_to_db,
+    dag=dag,
+    op_args=[t3.output],
+)
+
+t1 >> t2 >> t3 >> t4 >> t5
 

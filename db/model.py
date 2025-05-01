@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Pri
 from sqlalchemy.orm import declarative_base, relationship
 from datetime import datetime
 from sqlalchemy import create_engine
+from sqlalchemy import DDL, event
 
 Base = declarative_base()
 
@@ -13,6 +14,28 @@ class Empresa(Base):
     data_ipo = Column(DateTime, nullable=True)
     url_imagem = Column(String, nullable=True)
 
+class Ticker(Base):
+    __tablename__ = 'ticker'
+    codigo_isin = Column(String, primary_key = True)
+    id_empresa = Column(Integer, ForeignKey('empresa.id_empresa'))
+    ticker = Column(String, nullable=False)
+    
+    empresa = relationship('Empresa', backref='tickers')
+
+class Cotacao(Base):
+    __tablename__ = 'cotacao'
+    codigo_isin = Column(String, ForeignKey('ticker.codigo_isin'), primary_key=True)
+    data_pregao = Column(DateTime, primary_key=True)
+    abertura = Column(Float)
+    fechamento = Column(Float)
+    numero_de_negocios = Column(Float)
+    quantidade_negociada = Column(Float)
+    volume_negociado = Column(Float)
+    
+    ticker = relationship('Ticker', back_populates='cotacoes')
+    
+    __table_args__ = (PrimaryKeyConstraint('codigo_isin', 'data_pregao'), {})
+
 class Relatorio(Base):
     __tablename__ = 'relatorio'
     id_relatorio = Column(Integer, primary_key=True)
@@ -23,9 +46,6 @@ class Relatorio(Base):
     ultima_atualizacao = Column(DateTime, default=datetime.now)
 
     empresa = relationship('Empresa')
-    __table_args__ = (
-        UniqueConstraint('tipo_relatorio', 'id_empresa', 'data_inicio', 'data_fim', name='unique_relatorio'),
-    )
 
 class DadosRelatorio(Base):
     __tablename__ = 'dados_relatorio'
@@ -78,3 +98,12 @@ class Indicadores(Base):
 
 engine = create_engine('postgresql+psycopg2://admin:admin_password@localhost:5432/meu_banco')
 Base.metadata.create_all(engine)
+
+event.listen(
+    Relatorio.__table__,
+    'after_create',
+    DDL("""
+        ALTER TABLE %(table)s ADD CONSTRAINT %(constraint_name)s
+        UNIQUE NULLS NOT DISTINCT (tipo_relatorio, id_empresa, data_inicio, data_fim)
+    """).execute_if(dialect='postgresql'),
+)
