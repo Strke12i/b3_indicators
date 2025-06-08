@@ -19,10 +19,12 @@ default_args = {
     "retries": 0,
 }
 
-db_config = 'postgresql+psycopg2://admin:admin_password@db:5432/meu_banco'
-engine = create_engine(db_config)
-
-engine = create_engine('postgresql+psycopg2://admin:admin_password@db:5432/meu_banco')
+model = "v2"
+if model == "v2":
+    engine = create_engine('postgresql+psycopg2://admin:admin_password@db_v2:5432/meu_banco')
+else:
+    engine = create_engine('postgresql+psycopg2://admin:admin_password@db:5432/meu_banco')
+    
 Session = sessionmaker(bind=engine)
 session = Session()
 
@@ -49,8 +51,8 @@ with DAG(
                 query = text("""
                     SELECT DISTINCT id_empresa
                     FROM relatorio
-                    WHERE ultima_atualizacao >= CURRENT_DATE - INTERVAL '1 day'
                 """)
+                # WHERE ultima_atualizacao >= CURRENT_DATE - INTERVAL '1 day'
                 result = conn.execute(query).fetchall()
             empresas_ids = [row[0] for row in result]
             logger.info(f"Encontradas {len(empresas_ids)} empresas: {empresas_ids}")
@@ -64,7 +66,10 @@ with DAG(
         """
         Calcula e atualiza os indicadores para uma empresa.
         """
-        db_config = 'postgresql+psycopg2://admin:admin_password@db:5432/meu_banco'
+        if model == "v2":
+            db_config = 'postgresql+psycopg2://admin:admin_password@db_v2:5432/meu_banco'
+        else:
+            db_config = 'postgresql+psycopg2://admin:admin_password@db:5432/meu_banco'
         try:
             logger.info(f"Processando indicadores para a empresa {id_empresa}.")
             calculadora = CalculadoraIndicadoresFinanceiros(db_config, id_empresa)

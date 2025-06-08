@@ -19,7 +19,12 @@ from sqlalchemy.dialects.postgresql import insert
 # ----------------------------
 # CONEXÃO COM O BANCO
 # ----------------------------
-engine = create_engine('postgresql+psycopg2://admin:admin_password@db:5432/meu_banco')
+model = "v2"
+if model == "v2":
+    engine = create_engine('postgresql+psycopg2://admin:admin_password@db_v2:5432/meu_banco')
+else:
+    engine = create_engine('postgresql+psycopg2://admin:admin_password@db:5432/meu_banco')
+
 Session = sessionmaker(bind=engine)
 session = Session()
 metadata = MetaData(bind=engine)
@@ -230,10 +235,13 @@ def insert_data_v2(df_data, att_time):
                 from sqlalchemy.dialects.postgresql import insert
                 dados_relatorios_data = list(dados_relatorios_data.values())
                 stmt = insert(dados_relatorio).values(dados_relatorios_data)
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=['id_relatorio', 'codigo_conta'],
-                    set_={'descricao': stmt.excluded.descricao, 'valor': stmt.excluded.valor}
-                )
+                if model == "v2":
+                    stmt = stmt.on_conflict_do_nothing(index_elements=['id_relatorio', 'codigo_conta'])
+                else:
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=['id_relatorio', 'codigo_conta'],
+                        set_={'descricao': stmt.excluded.descricao, 'valor': stmt.excluded.valor}
+                    )
                 session.execute(stmt)
                 session.commit()
                 print("Dados inseridos com sucesso!")

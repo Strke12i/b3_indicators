@@ -356,8 +356,10 @@ with DAG(
         arquivos_dfp = buscar_datas(url_dfp)  # dict: {"dfp_cia_aberta_2021.zip": "30-Mar-2025", ...}
 
         # Data de hoje (no formato date, sem horas)
-        # Faz a data de hoje ser 06-Apr-2025
         hoje = datetime.datetime.today().date()
+        
+        # Faz hoje ser igual 25 de maio de 2025
+        hoje = datetime.date(2025, 5, 25)
 
         # Função auxiliar para verificar se a data_mod = HOJE
         def data_e_hoje(data_mod_str):

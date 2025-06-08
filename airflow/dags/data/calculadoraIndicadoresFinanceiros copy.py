@@ -159,50 +159,31 @@ class CalculadoraIndicadoresFinanceiros:
     def filtrar_metricas(self):
         if self.df is None:
             raise ValueError("Dados não carregados. Execute carregar_dados() primeiro.")
-
+        
         datas_fim = self.df['data_fim'].unique()
-
+        
         for nome_metrica, config in self.metricas.items():
             df_metrica = pd.DataFrame()
             if nome_metrica == 'deprec':
-                # Termos-chave para identificar itens de depreciação
-                termos_chave = ["deprecia", "amortiza", "exaust", "deple"]
-
-                # Filtrar por tipo_relatorio
-                dados_fluxo = self.df[self.df["tipo_relatorio"] == config['tipo_relatorio']]
-
-                # Função para verificar se contém algum termo de depreciação
-                def contem_termo_depreciacao(descricao):
-                    if pd.isna(descricao):
-                        return False
-                    descricao_lower = descricao.lower()
-                    return any(termo in descricao_lower for termo in termos_chave)
-
-                # Filtrar códigos que começam com "6.01.01." E que contenham termos de depreciação
-                subcategorias_depreciacao = dados_fluxo[
-                    (dados_fluxo["codigo_conta"].str.startswith("6.01.01.")) &
-                    (dados_fluxo["descricao"].apply(contem_termo_depreciacao))
+                # Lógica específica para a métrica 'deprec'
+                palavras_chave = ["Depreciação", "Amortização", "Depleção", "Exaustão", "Depreciações", "Amortizações"]
+                # Filtrar por tipo_relatorio e códigos que começam com '6.01.01'
+                dados_filtrados = self.df[
+                    (self.df["tipo_relatorio"] == config['tipo_relatorio']) &
+                    (self.df["codigo_conta"].str.startswith("6.01.01"))
                 ]
-                
-                self.dados_test = subcategorias_depreciacao
-
-                # Somar apenas os itens de depreciação
-                if not subcategorias_depreciacao.empty:
-                    df_metrica = subcategorias_depreciacao.groupby(['id_empresa', 'data_fim', 'data_inicio'], as_index=False).agg({
+                # Verificar se a descrição contém qualquer uma das palavras-chave
+                filtro = dados_filtrados[
+                    dados_filtrados["descricao"].str.contains('|'.join(palavras_chave), case=False, na=False)
+                ]
+                # Somar os valores por id_empresa e data_fim
+                if not filtro.empty:
+                    df_metrica = filtro.groupby(['id_empresa', 'data_fim', 'data_inicio'], as_index=False).agg({
                         'valor': 'sum'
                     }).rename(columns={'valor': nome_metrica})
-                else:
-                    # Se não encontrar itens de depreciação, valor será 0
-                    df_metrica = pd.DataFrame({
-                        'id_empresa': [self.id_empresa] * len(datas_fim),
-                        'data_fim': datas_fim,
-                        'data_inicio': [pd.NaT] * len(datas_fim),
-                        nome_metrica: [0] * len(datas_fim)
-                    })
-
             else:
-                # Lógica original para outras métricas...
                 if isinstance(config['codigo_conta'], (list, tuple)):
+                    # Para múltiplos códigos, tentar cada um até encontrar um match
                     for codigo in config['codigo_conta']:
                         filtro = self._filtrar_metrica(
                             self.df, config['tipo_relatorio'], codigo, config['descricao'], nome_metrica
@@ -214,7 +195,7 @@ class CalculadoraIndicadoresFinanceiros:
                     df_metrica = self._filtrar_metrica(
                         self.df, config['tipo_relatorio'], config['codigo_conta'], config['descricao'], nome_metrica
                     )
-
+            
             if df_metrica.empty:
                 df_metrica = pd.DataFrame({
                     'id_empresa': [self.id_empresa] * len(datas_fim),
@@ -225,11 +206,8 @@ class CalculadoraIndicadoresFinanceiros:
             self.dataframes_metricas[nome_metrica] = df_metrica
             del df_metrica
             gc.collect()
-
-    # ... (resto do método permanece inalterado)
-
+        
     # ... (o restante do método para metricas_ajustadas permanece inalterado)
-   
         
         for nome_metrica, config in self.metricas_ajustadas.items():
             df_ajustado = pd.DataFrame()
@@ -377,6 +355,7 @@ class CalculadoraIndicadoresFinanceiros:
         return self.calcular_indicadores_12m()
 
     def calculo_indicadores(self, df_resultados):
+        #df_resultados.fillna(0, inplace=True)
         indicadores_primarios = {
             'capital_investido': (
                 df_resultados['ativo_total'] - 

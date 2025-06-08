@@ -4,3 +4,9 @@
 *.cpython-312.pyc
 /exclalidraw
 /airflow/logs
+*.csv
+*.zip
+tests/build/Debug/outDebug.exe
+tests/COTAHIST_D15052025.TXT
+tests/build/Debug/t1.o
+*.json
